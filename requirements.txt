@@ -1,8 +1,7 @@
 streamlit
 transformers
-sentencepiece
 torch
+sentencepiece
 deep-translator
-language_tool_python
-PyMuPDF
 gTTS
+pymupdf
