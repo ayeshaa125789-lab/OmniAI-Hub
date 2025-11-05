@@ -1,198 +1,153 @@
 import streamlit as st
-import fitz  # PyMuPDF
-import os
-import tempfile
-import language_tool_python
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
-from transformers import pipeline, AutoModelForSeq2SeqLM, AutoTokenizer
+from transformers import pipeline
+from textblob import TextBlob
 from deep_translator import GoogleTranslator
 from gtts import gTTS
-from io import BytesIO
-from docx import Document
-from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
-import speech_recognition as sr
+import os
+import tempfile
+import fitz  # PyMuPDF for PDF text extraction
+import requests
 
-# ------------------------------
-# Page setup
-# ------------------------------
-st.set_page_config(page_title="Omni AI Hub", page_icon="🤖", layout="wide")
-st.title("💎 Omni AI Hub – All-in-One Smart Assistant (Free & Open Source)")
+st.set_page_config(page_title="OmniAI Hub", page_icon="💎", layout="wide")
 
-# ------------------------------
-# Initialize models
-# ------------------------------
+# ---------------------------------------
+# 🌐 Load Models (CPU-Friendly)
+# ---------------------------------------
 @st.cache_resource
 def load_models():
-    summarizer = pipeline("summarization", model="t5-small", tokenizer="t5-small")
-    paraphraser = pipeline("text2text-generation", model="Vamsi/T5_Paraphrase_Paws")
-    chatbot = pipeline("text2text-generation", model="google/flan-t5-small")
-    return summarizer, paraphraser, chatbot
+    summarizer = pipeline("summarization", model="facebook/bart-large-cnn", device_map="auto")
+    paraphraser = pipeline("text2text-generation", model="Vamsi/T5_Paraphrase_Paws", device_map="auto")
+    chatbot = pipeline("text2text-generation", model="google/flan-t5-base", device_map="auto")
+    grammar_model = pipeline("text2text-generation", model="prithivida/grammar_error_correcter_v1", device_map="auto")
+    return summarizer, paraphraser, chatbot, grammar_model
 
-summarizer, paraphraser, chatbot = load_models()
-tool = language_tool_python.LanguageTool('en-US')
+summarizer, paraphraser, chatbot, grammar_model = load_models()
 
-# ------------------------------
-# Helper Functions
-# ------------------------------
-def extract_text_from_pdf(file):
-    text = ""
-    with fitz.open(stream=file.read(), filetype="pdf") as pdf:
-        for page in pdf:
-            text += page.get_text()
-    return text
+# ---------------------------------------
+# ✍️ Grammar Correction Functions
+# ---------------------------------------
+def correct_grammar_simple(text):
+    blob = TextBlob(text)
+    return str(blob.correct())
 
+def correct_grammar_advanced(text):
+    try:
+        result = grammar_model(text, max_length=128, do_sample=False)
+        return result[0]['generated_text']
+    except Exception as e:
+        return f"⚠️ Error in grammar correction: {e}"
+
+def correct_grammar(text, mode="simple"):
+    if mode == "simple":
+        return correct_grammar_simple(text)
+    else:
+        return correct_grammar_advanced(text)
+
+# ---------------------------------------
+# 🧠 Helper Functions
+# ---------------------------------------
 def summarize_text(text):
-    if len(text.split()) < 30:
-        return "Text too short to summarize."
-    chunks = [text[i:i+1000] for i in range(0, len(text), 1000)]
-    result = []
-    for chunk in chunks:
-        summary = summarizer(chunk, max_length=120, min_length=30, do_sample=False)[0]['summary_text']
-        result.append(summary)
-    return " ".join(result)
+    return summarizer(text, max_length=150, min_length=40, do_sample=False)[0]['summary_text']
 
 def paraphrase_text(text):
-    output = paraphraser(f"paraphrase: {text}", max_length=200, num_return_sequences=1)
-    return output[0]['generated_text']
+    return paraphraser(text, max_length=100, do_sample=False)[0]['generated_text']
 
-def grammar_check(text):
-    matches = tool.check(text)
-    corrected = language_tool_python.utils.correct(text, matches)
-    return corrected
-
-def check_plagiarism(text1, text2):
-    vectorizer = TfidfVectorizer().fit_transform([text1, text2])
-    similarity = cosine_similarity(vectorizer)[0][1]
-    return round(similarity * 100, 2)
-
-def chatbot_reply(prompt):
-    response = chatbot(prompt, max_length=100)[0]['generated_text']
-    return response
+def chat_response(prompt):
+    return chatbot(prompt, max_length=128, do_sample=False)[0]['generated_text']
 
 def translate_text(text, target_lang):
-    translated = GoogleTranslator(source='auto', target=target_lang).translate(text)
-    return translated
+    return GoogleTranslator(source='auto', target=target_lang).translate(text)
 
-def text_to_speech(text, lang='en'):
-    tts = gTTS(text=text, lang=lang)
-    buf = BytesIO()
-    tts.write_to_fp(buf)
-    return buf
+def extract_text_from_pdf(uploaded_file):
+    pdf_text = ""
+    with fitz.open(stream=uploaded_file.read(), filetype="pdf") as doc:
+        for page in doc:
+            pdf_text += page.get_text()
+    return pdf_text
 
-def transcribe_voice():
-    r = sr.Recognizer()
-    with sr.Microphone() as source:
-        st.info("🎙 Speak now...")
-        audio = r.listen(source)
-    try:
-        return r.recognize_google(audio)
-    except:
-        return "Sorry, I couldn't understand the voice."
+def text_to_speech(text, lang="en"):
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmpfile:
+        tts = gTTS(text, lang=lang)
+        tts.save(tmpfile.name)
+        return tmpfile.name
 
-# ------------------------------
-# Sidebar Navigation
-# ------------------------------
-menu = st.sidebar.selectbox("🧩 Choose a Feature", [
-    "📄 PDF Summarizer",
-    "✍️ Grammar & Paraphraser",
-    "🔎 Plagiarism Checker",
-    "💬 AI Chatbot",
-    "🌍 Translator & Voice",
-    "🧾 Text Downloader"
+# ---------------------------------------
+# 🏠 Sidebar
+# ---------------------------------------
+st.sidebar.title("💎 OmniAI Hub")
+tool = st.sidebar.radio("Choose Tool", [
+    "📄 Summarizer",
+    "🌀 Paraphraser",
+    "💬 Chatbot",
+    "🗣 Translator + Voice",
+    "🧾 Grammar Corrector",
+    "📚 PDF Summarizer"
 ])
 
-# ------------------------------
-# PDF Summarizer
-# ------------------------------
-if menu == "📄 PDF Summarizer":
-    st.subheader("📚 Upload a PDF and get summary")
-    pdf_file = st.file_uploader("Upload PDF", type=["pdf"])
-    if pdf_file:
-        text = extract_text_from_pdf(pdf_file)
-        st.text_area("Extracted Text", text[:1000] + "..." if len(text) > 1000 else text, height=200)
-        if st.button("Summarize"):
+# ---------------------------------------
+# 🧩 Tool Sections
+# ---------------------------------------
+
+if tool == "📄 Summarizer":
+    st.header("📄 AI Summarizer")
+    text = st.text_area("Enter text to summarize:")
+    if st.button("Summarize"):
+        if text.strip():
             summary = summarize_text(text)
             st.success(summary)
-
-# ------------------------------
-# Grammar & Paraphraser
-# ------------------------------
-elif menu == "✍️ Grammar & Paraphraser":
-    st.subheader("🧠 Grammar Correction & Paraphrasing")
-    text = st.text_area("Enter text:")
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("Grammar Check"):
-            corrected = grammar_check(text)
-            st.success(corrected)
-    with col2:
-        if st.button("Paraphrase"):
-            result = paraphrase_text(text)
-            st.info(result)
-
-# ------------------------------
-# Plagiarism Checker
-# ------------------------------
-elif menu == "🔎 Plagiarism Checker":
-    st.subheader("🔍 Compare Two Texts")
-    text1 = st.text_area("Text 1")
-    text2 = st.text_area("Text 2")
-    if st.button("Check Similarity"):
-        sim = check_plagiarism(text1, text2)
-        st.write(f"Similarity: **{sim}%**")
-
-# ------------------------------
-# AI Chatbot
-# ------------------------------
-elif menu == "💬 AI Chatbot":
-    st.subheader("🤖 Ask me anything")
-    user_input = st.text_input("Your question:")
-    if st.button("Get Answer"):
-        st.info(chatbot_reply(user_input))
-
-# ------------------------------
-# Translator & Voice
-# ------------------------------
-elif menu == "🌍 Translator & Voice":
-    st.subheader("🗣️ Translate, Speak, or Record Voice")
-    lang_choice = st.selectbox("Select Language", {"English": "en", "Urdu": "ur", "Hindi": "hi"})
-    input_text = st.text_area("Enter text:")
-    if st.button("Translate"):
-        trans = translate_text(input_text, lang_choice)
-        st.success(trans)
-
-    if st.button("Speak"):
-        buf = text_to_speech(input_text, lang=lang_choice)
-        st.audio(buf.getvalue(), format='audio/mp3')
-
-    if st.button("🎤 Voice to Text"):
-        text = transcribe_voice()
-        st.write(f"🗣 You said: {text}")
-
-# ------------------------------
-# Text Downloader
-# ------------------------------
-elif menu == "🧾 Text Downloader":
-    st.subheader("📦 Download Text as File")
-    text = st.text_area("Enter text:")
-    filetype = st.selectbox("Choose format", ["TXT", "DOCX", "PDF"])
-    if st.button("Download"):
-        if filetype == "TXT":
-            st.download_button("Download TXT", text, file_name="output.txt")
-        elif filetype == "DOCX":
-            doc = Document()
-            doc.add_paragraph(text)
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
-                doc.save(tmp.name)
-                st.download_button("Download DOCX", tmp.read(), file_name="output.docx")
         else:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-                c = canvas.Canvas(tmp.name, pagesize=letter)
-                c.drawString(100, 700, text[:1000])
-                c.save()
-                st.download_button("Download PDF", tmp.read(), file_name="output.pdf")
+            st.warning("Please enter text to summarize.")
 
-st.sidebar.markdown("---")
-st.sidebar.info("Made with ❤️ using Streamlit + HuggingFace + LanguageTool")
+elif tool == "🌀 Paraphraser":
+    st.header("🌀 AI Paraphraser")
+    text = st.text_area("Enter text to paraphrase:")
+    if st.button("Paraphrase"):
+        if text.strip():
+            para = paraphrase_text(text)
+            st.success(para)
+        else:
+            st.warning("Please enter some text.")
+
+elif tool == "💬 Chatbot":
+    st.header("💬 AI Chatbot")
+    prompt = st.text_area("Ask me anything:")
+    if st.button("Ask"):
+        if prompt.strip():
+            answer = chat_response(prompt)
+            st.info(answer)
+        else:
+            st.warning("Please ask a question.")
+
+elif tool == "🗣 Translator + Voice":
+    st.header("🌐 Translator & Voice Generator")
+    text = st.text_area("Enter text:")
+    target_lang = st.text_input("Target language (e.g., urdu, french, german, hindi):")
+    if st.button("Translate & Speak"):
+        if text.strip() and target_lang.strip():
+            translated = translate_text(text, target_lang)
+            st.success(f"**Translated:** {translated}")
+            audio_path = text_to_speech(translated, lang="en")
+            st.audio(audio_path)
+        else:
+            st.warning("Please enter text and target language.")
+
+elif tool == "🧾 Grammar Corrector":
+    st.header("🧾 Grammar Correction Tool")
+    text = st.text_area("Enter your text to correct grammar:")
+    mode = st.radio("Choose Mode:", ["simple", "advanced"])
+    if st.button("Correct Grammar"):
+        if text.strip():
+            corrected = correct_grammar(text, mode)
+            st.success(f"**Corrected Text:**\n\n{corrected}")
+        else:
+            st.warning("Please enter text first.")
+
+elif tool == "📚 PDF Summarizer":
+    st.header("📚 PDF Summary Extractor")
+    uploaded_file = st.file_uploader("Upload PDF file", type=["pdf"])
+    if uploaded_file:
+        pdf_text = extract_text_from_pdf(uploaded_file)
+        st.text_area("Extracted Text:", pdf_text[:2000])
+        if st.button("Summarize PDF"):
+            summary = summarize_text(pdf_text)
+            st.success(summary)
