@@ -1,0 +1,13 @@
+streamlit
+transformers
+sentencepiece
+language_tool_python
+scikit-learn
+pandas
+deep-translator
+python-docx
+reportlab
+PyMuPDF
+gTTS
+SpeechRecognition
+torch
