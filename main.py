@@ -1,4 +1,4 @@
-]import streamlit as st
+import streamlit as st
 from transformers import pipeline
 from deep_translator import GoogleTranslator
 from gtts import gTTS
@@ -149,3 +149,4 @@ elif menu == "🎙️ Text to Voice":
             st.audio(path)
         else:
             st.warning("Enter text first.")
+
