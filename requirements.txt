@@ -2,11 +2,7 @@ streamlit
 transformers
 sentencepiece
 torch
-textblob
 deep-translator
+language_tool_python
 PyMuPDF
 gTTS
-python-docx
-reportlab
-scikit-learn
-SpeechRecognition
