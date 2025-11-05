@@ -1,11 +1,10 @@
-import streamlit as st
+]import streamlit as st
 from transformers import pipeline
 from deep_translator import GoogleTranslator
 from gtts import gTTS
 import fitz  # PyMuPDF
 import os
 import tempfile
-import language_tool_python
 
 # --------------------------- #
 # 🎯 APP CONFIG
@@ -23,10 +22,10 @@ def load_models():
     summarizer = pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
     paraphraser = pipeline("text2text-generation", model="Vamsi/T5_Paraphrase_Paws")
     chatbot = pipeline("text-generation", model="microsoft/DialoGPT-small")
-    grammar_tool = language_tool_python.LanguageTool('en-US')
-    return summarizer, paraphraser, chatbot, grammar_tool
+    grammar_fixer = pipeline("text2text-generation", model="prithivida/grammar_error_correcter_v1")
+    return summarizer, paraphraser, chatbot, grammar_fixer
 
-summarizer, paraphraser, chatbot, grammar_tool = load_models()
+summarizer, paraphraser, chatbot, grammar_fixer = load_models()
 
 # --------------------------- #
 # ⚙️ HELPER FUNCTIONS
@@ -44,13 +43,11 @@ def chat_with_ai(prompt):
     return response[0]['generated_text']
 
 def grammar_check_text(text):
-    matches = grammar_tool.check(text)
-    corrected = language_tool_python.utils.correct(text, matches)
-    return corrected
+    fixed = grammar_fixer(f"grammar: {text}", max_length=200, do_sample=False)
+    return fixed[0]['generated_text']
 
 def translate_text(text, target_lang):
-    translated = GoogleTranslator(source='auto', target=target_lang).translate(text)
-    return translated
+    return GoogleTranslator(source='auto', target=target_lang).translate(text)
 
 def extract_pdf_text(pdf_file):
     text = ""
@@ -110,8 +107,8 @@ elif menu == "✍️ Paraphraser":
 
 elif menu == "🔠 Grammar Checker":
     st.subheader("AI Grammar & Spell Checker")
-    text = st.text_area("Enter text to check grammar")
-    if st.button("Check Grammar"):
+    text = st.text_area("Enter text to fix grammar")
+    if st.button("Fix Grammar"):
         if text.strip():
             st.success(grammar_check_text(text))
         else:
